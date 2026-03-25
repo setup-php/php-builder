@@ -233,7 +233,7 @@ switch_version() {
 }
 
 cleanup_environment() {
-  rm -rf ~/php-build "${INSTALL_ROOT:?}" "${php_build_dir:?}"
+  rm -rf ~/php-build /tmp/php-build /tmp/config.cache "${INSTALL_ROOT:?}" "${php_build_dir:?}"
   mkdir -p ~/php-build "${INSTALL_ROOT:?}" "${php_build_dir:?}"
 }
 
