@@ -138,6 +138,17 @@ patch_redis() {
     sed -i 's/save_path\[/ZSTR_VAL(save_path)[/g' redis_session.c
     sed -i 's/save_path+i/ZSTR_VAL(save_path)+i/g' redis_session.c
     sed -i 's/estrdup(save_path)/estrdup(ZSTR_VAL(save_path))/g' redis_session.c
+    sed -i 's/EMPTY_SWITCH_DEFAULT_CASE()/default: ZEND_UNREACHABLE();/' library.c
+  fi
+}
+
+# Function to patch ast source.
+patch_ast() {
+  if [[ "$PHP_VERSION" = "8.6" ]]; then
+    for file in ast.c ast_data.c; do
+      sed -i 's/ZEND_AST_METHOD_REFERENCE/ZEND_AST_TRAIT_METHOD_REFERENCE/g' "$file"
+    done
+    sed -i 's/EMPTY_SWITCH_DEFAULT_CASE()/default: ZEND_UNREACHABLE();/' ast.c
   fi
 }
 
@@ -179,6 +190,7 @@ patch_mongodb() {
 # Function to patch apcu source.
 patch_apcu() {
   [[ "$PHP_VERSION" = "8.6" ]] && sed -i 's/zval_dtor/zval_ptr_dtor_nogc/' apc_cache.c
+  [[ "$PHP_VERSION" = "8.6" ]] && sed -i 's/EMPTY_SWITCH_DEFAULT_CASE()/default: ZEND_UNREACHABLE();/g' apc_persist.c
 }
 
 # Function to patch msgpack source.
