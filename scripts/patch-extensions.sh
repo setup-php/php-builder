@@ -178,6 +178,7 @@ patch_decimal() {
 # Function to patch ds source.
 patch_ds() {
   if [[ "$PHP_VERSION" = "8.6" ]]; then
+    sed -i 's/if (zend_parse_parameter(ZEND_PARSE_PARAMS_QUIET, 1, offset, "l", \&index) == FAILURE) {/bool failed = false; index = zval_try_get_long(offset, \&failed); if (failed) {/' src/php/handlers/php_seq_handlers.c
     patch_xt_offsetof_tree src/php
   fi
 }
@@ -436,6 +437,7 @@ patch_uopz() {
   if [[ "$PHP_VERSION" = "8.6" ]]; then
     sed -i 's/INI_INT(/zend_ini_long_literal(/g' uopz.c
     sed -i 's/zval_dtor/zval_ptr_dtor_nogc/g' src/constant.c
+    sed -i 's/Z_OBJ(EX(This)) ? \&EX(This) : NULL/(ZEND_CALL_INFO(execute_data) \& ZEND_CALL_HAS_THIS) ? Z_OBJ(EX(This)) : NULL/g' src/hook.c src/return.c
   fi
 }
 
