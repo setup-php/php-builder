@@ -162,6 +162,11 @@ patch_excimer() {
     sed -i 's/INI_INT(/zend_ini_long_literal(/g' excimer.c
     patch_xt_offsetof_tree .
   fi
+  if [[ "$PHP_VERSION" = "8.7" ]]; then
+    # php/php-src#23927 replaced Zend atomics with C11 atomics.
+    sed -i 's/zend_atomic_bool_store(/atomic_store(/g' excimer_timer.c
+    sed -i 's/zend_atomic_bool/atomic_bool/g' excimer_timer.h
+  fi
 }
 
 # Function to patch decimal source.
@@ -269,6 +274,9 @@ patch_gearman() {
     find . -type f -exec sed -i 's/zval_dtor/zval_ptr_dtor_nogc/g' {} +
     patch_xt_offsetof_tree .
   fi
+  if [[ "$PHP_VERSION" = "8.7" ]]; then
+    sed -i -E 's/zend_is_callable\(([^,]+), 0, &callable\)/zend_is_callable_ex(\1, NULL, 0, \&callable, NULL, NULL)/g' php_gearman_client.c php_gearman_worker.c
+  fi
 }
 
 # Function to patch gnupg source.
@@ -344,6 +352,9 @@ patch_solr() {
 # Function to patch xmlrpc source.
 patch_xmlrpc() {
   [[ "$PHP_VERSION" = "8.6" || "$PHP_VERSION" = "8.7" ]] && patch_xt_offsetof_tree .
+  if [[ "$PHP_VERSION" = "8.7" ]]; then
+    sed -i 's/zend_is_callable(php_function, 0, &php_function_name)/zend_is_callable_ex(php_function, NULL, 0, \&php_function_name, NULL, NULL)/g' xmlrpc-epi-php.c
+  fi
 }
 
 # Function to patch rrd source.
@@ -573,6 +584,10 @@ patch_yaml() {
       sed -i 's/zval_dtor/zval_ptr_dtor_nogc/' $file
     done
   fi
+  if [[ "$PHP_VERSION" = "8.7" ]]; then
+    # php/php-src#23996 changed the third parameter from a callable name to an error string.
+    sed -i 's/zend_is_callable(entry, 0, &name)/zend_is_callable_ex(entry, NULL, 0, \&name, NULL, NULL)/g' yaml.c
+  fi
 }
 
 # Function to path zmq source
@@ -594,6 +609,12 @@ patch_mongodb() {
     sed -i 's/zval_is_true/zend_is_true/' src/MongoDB/ServerApi.c
     sed -i 's/zval_dtor/zval_ptr_dtor_nogc/' src/MongoDB/Cursor.c
     patch_xt_offsetof_tree .
+  fi
+  if [[ "$PHP_VERSION" = "8.7" ]]; then
+    # PHP 8.7 changed interface_gets_implemented to return void.
+    sed -i -e 's/^static int phongo_implement_unserializable(/static void phongo_implement_unserializable(/' \
+           -e '/^[[:space:]]*return FAILURE;$/d' \
+           -e '/^[[:space:]]*return SUCCESS;$/d' src/BSON/Unserializable.c
   fi
 }
 
