@@ -15,8 +15,12 @@ def gh(path, method='GET', data=None):
     command = ['gh', 'api', path, '--method', method]
     if data is not None:
         command += ['--input', '-']
-    response = subprocess.run(command, input=json.dumps(data).encode() if data is not None else None,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        response = subprocess.run(command, input=json.dumps(data).encode() if data is not None else None,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=15 if method == 'GET' else 60)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError('GitHub API operation timed out: ' + method + ' ' + path.split('/actions/')[0]) from None
     if response.returncode:
         raise RuntimeError('GitHub API operation failed: ' + method + ' ' + path.split('/actions/')[0])
     return json.loads(response.stdout) if response.stdout else None

@@ -1,11 +1,12 @@
 import collections
 import sys
+import subprocess
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from managed_pool import capacity_reservations, launch_order, matching_profiles, pages, plan_launches, target_jobs
+from managed_pool import capacity_reservations, gh, launch_order, matching_profiles, pages, plan_launches, target_jobs
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -19,6 +20,12 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_slow_api_reads_are_bounded_and_leave_other_runs_available(self):
+        with patch('managed_pool.subprocess.run', side_effect=subprocess.TimeoutExpired('gh', 15)) as command:
+            with self.assertRaisesRegex(RuntimeError, 'timed out'):
+                gh('repos/example/php-builder/actions/runs/1/jobs')
+            self.assertEqual(command.call_args.kwargs['timeout'], 15)
+
     def test_job_inventory_uses_smaller_pages_until_complete(self):
         with patch('managed_pool.gh', side_effect=[{'jobs': list(range(50))}, {'jobs': [50]}]) as api:
             self.assertEqual(pages('jobs?filter=latest', 'jobs'), list(range(51)))
