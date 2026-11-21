@@ -8,7 +8,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from managed_pool import capacity_reservations, gh, launch_order, matching_profiles, pages, plan_launches, target_jobs
+from managed_pool import capacity_reservations, gh, launch_order, matching_profiles, pages, plan_launches, refresh_registration, target_jobs
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -22,6 +22,26 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_installation_tokens_follow_the_repository_for_reads_and_writes(self):
+        success = subprocess.CompletedProcess([], 0, b'{}', b'')
+        with patch.dict('os.environ', {'GH_TARGET_TOKEN': 'target-token', 'GH_HOST_TOKEN': 'host-token'}), \
+                patch('managed_pool.subprocess.run', return_value=success) as command:
+            for repo, token in [('shivammathur/php-builder', 'target-token'), ('setup-php/php-builder', 'host-token')]:
+                for method in ['GET', 'POST', 'PUT', 'DELETE']:
+                    gh(f'repos/{repo}/actions/runners', method)
+                    self.assertEqual(command.call_args.kwargs['env']['GH_TOKEN'], token)
+            gh('repos/setup-php/php-builder-other/actions/runs')
+            self.assertIsNone(command.call_args.kwargs['env'])
+
+    def test_registration_secret_uses_host_token_and_stdin(self):
+        with patch.dict('os.environ', {'GH_HOST_TOKEN': 'host-token'}), \
+                patch('managed_pool.gh', return_value={'token': 'registration-secret'}), \
+                patch('managed_pool.subprocess.run') as command:
+            refresh_registration('test-environment')
+            self.assertEqual(command.call_args.kwargs['env']['GH_TOKEN'], 'host-token')
+            self.assertEqual(command.call_args.kwargs['input'], b'registration-secret')
+            self.assertNotIn('registration-secret', command.call_args.args[0])
+
     def test_api_headers_record_rate_reset_and_stop_further_writes(self):
         response = subprocess.CompletedProcess([], 1,
             b'HTTP/2.0 403 Forbidden\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 2000000000\r\n\r\n{"message":"rate limit exceeded"}', b'HTTP 403')

@@ -13,6 +13,12 @@ import time
 from managed_profiles import PROFILES, TARGET, HOST, BRANCH, LIMITS, identify, labels
 
 
+def repository_environment(repo):
+    variable = {TARGET: 'GH_TARGET_TOKEN', HOST: 'GH_HOST_TOKEN'}.get(repo)
+    if variable and os.environ.get(variable):
+        return dict(os.environ, GH_TOKEN=os.environ[variable])
+    return None
+
 
 def gh(path, method='GET', data=None):
     limit_file = os.environ.get('GH_RATE_LIMIT_STATE')
@@ -24,6 +30,11 @@ def gh(path, method='GET', data=None):
         command += ['--input', '-']
     environment = None
     for repo, variable in ((TARGET, 'GH_TARGET_READ_TOKEN'), (HOST, 'GH_HOST_READ_TOKEN')):
+        if not path.startswith(f'repos/{repo}/'):
+            continue
+        environment = repository_environment(repo)
+        if environment:
+            break
         if method == 'GET' and path.startswith(f'repos/{repo}/actions/runs') and os.environ.get(variable):
             environment = dict(os.environ, GH_TOKEN=os.environ[variable])
             break
@@ -202,7 +213,8 @@ def refresh_registration(name):
     registration = gh(f'repos/{TARGET}/actions/runners/registration-token', 'POST')
     subprocess.run(['gh', 'secret', 'set', 'RUNNER_REGISTRATION_TOKEN', '-R', HOST, '--env', name],
                    input=registration['token'].encode(), stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, check=True)
+                   stderr=subprocess.DEVNULL, check=True, timeout=60,
+                   env=repository_environment(HOST))
     del registration
 
 
