@@ -14,14 +14,20 @@ docker run --rm -v "$work:/validation" ubuntu:22.04 bash -euo pipefail -c '
   apt-get update -qq
   apt-get install -y --no-install-recommends zstd xz-utils > /dev/null
   cd /validation
+  xz --version
   zstd -V
   free -m || true
+  xz -dc package.tar.xz > package.tar
+  original=$(sha256sum package.tar | cut -d " " -f1)
+  time xz -e9 -T0 --memlimit-compress=75% --no-adjust -vv -c package.tar > threaded.tar.xz
+  xz -t threaded.tar.xz
+  threaded=$(xz -dc threaded.tar.xz | sha256sum | cut -d " " -f1)
+  test "$original" = "$threaded"
   xz -dc package.tar.xz | zstd -22 -T0 --ultra > package.tar.zst
   zstd -t package.tar.zst
-  original=$(xz -dc package.tar.xz | sha256sum | cut -d " " -f1)
   repacked=$(zstd -dc package.tar.zst | sha256sum | cut -d " " -f1)
   test "$original" = "$repacked"
   printf "Verified PHP debug archive content SHA256: %s\n" "$repacked"
   tar --use-compress-program=zstd -tf package.tar.zst | wc -l
-  ls -lh package.tar.xz package.tar.zst
+  ls -lh package.tar.xz threaded.tar.xz package.tar.zst
 '
