@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from managed_pool import matching_profiles, plan_launches
+from managed_pool import capacity_reservations, matching_profiles, plan_launches
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -18,6 +18,19 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_stopped_hosts_release_capacity_but_keep_busy_cleanup_guard(self):
+        stopped, live, unknown = [name('namespace-u24-x64', i) for i in range(3)]
+        protected = {stopped, live, unknown}
+        runners = [{'name': stopped, 'status': 'offline', 'busy': True},
+                   {'name': live, 'status': 'online', 'busy': True},
+                   {'name': unknown, 'status': 'offline', 'busy': True}]
+        reservations = capacity_reservations(protected, runners, {
+            stopped: {'status': 'completed'}, live: {'status': 'in_progress'}})
+        self.assertEqual(reservations, {live, unknown})
+        self.assertIn(stopped, protected)
+        planned, _, _, _ = plan_launches(reservations, runners, [job(1)], {'namespace': 3, 'github': 0})
+        self.assertEqual(planned, ['namespace-u24-x64'])
+
     def test_every_provider_name_fits_github_limit_and_old_hosts_remain_owned(self):
         for key in PROFILES:
             current = name(key, 1)

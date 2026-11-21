@@ -89,6 +89,15 @@ def matching_profiles(job):
     return [key for key in PROFILES if requested <= {label.lower() for label in labels(key)}]
 
 
+def capacity_reservations(protected, runners, known):
+    # A stopped host no longer consumes provider resources, even while GitHub
+    # still reports its disconnected child job as busy. Keep its cleanup guard.
+    stopped = {runner['name'] for runner in runners
+               if runner['status'] == 'offline'
+               and known.get(runner['name'], {}).get('status') == 'completed'}
+    return protected - stopped
+
+
 def plan_launches(protected, runners, jobs, limits):
     registered = {runner['name']: runner for runner in runners}
     consumed = {job.get('runner_name') for job in jobs if job['status'] != 'queued'}
@@ -203,9 +212,10 @@ def maintain():
             if not dry_run:
                 gh(f"repos/{HOST}/actions/runs/{run['id']}/cancel", 'POST')
                 print(f'Cancelled stale queued host {name}', flush=True)
-    planned, queued, covered, deferred = plan_launches(protected, runners, jobs, limits)
+    reservations = capacity_reservations(protected, runners, known)
+    planned, queued, covered, deferred = plan_launches(reservations, runners, jobs, limits)
     print(json.dumps({'queued_jobs': queued, 'covered_by_existing_hosts': covered,
-                      'active_hosts': len(active), 'reserved_hosts': len(protected),
+                      'active_hosts': len(active), 'reserved_hosts': len(reservations),
                       'provider_capacities': limits, 'launching': dict(collections.Counter(planned)),
                       'capacity_deferred': deferred, 'dry_run': dry_run}), flush=True)
     if dry_run:
