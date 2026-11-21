@@ -1,0 +1,66 @@
+name: Ephemeral PHP build runner
+run-name: Managed runner ${{ inputs.pool || 'validation' }}
+
+on:
+  push:
+    branches: [feature/php-build-runner-pool]
+    paths:
+      - .github/workflows/managed-runner.yml
+      - scripts/managed_*.py
+      - scripts/runner_pool.py
+      - scripts/prepare-linux-runner.sh
+      - tests/**
+  workflow_dispatch:
+    inputs:
+      pool:
+        description: Prepared environment for one ephemeral runner
+        type: string
+        required: true
+      image:
+        description: Native Linux host matching the registered runner
+        type: choice
+        required: true
+        options:
+          - nscloud-ubuntu-22.04-amd64-1x2
+          - nscloud-ubuntu-22.04-arm64-1x2
+          - nscloud-ubuntu-24.04-amd64-1x2
+          - nscloud-ubuntu-24.04-arm64-1x2
+          - ubuntu-22.04
+          - ubuntu-22.04-arm
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'push'
+    runs-on: nscloud-ubuntu-24.04-amd64-1x2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -v
+
+  runner:
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+    needs: validate
+    name: Single-job ${{ inputs.image }} runner
+    runs-on: ${{ inputs.image }}
+    timeout-minutes: 360
+    environment: ${{ inputs.pool }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Prepare Linux service isolation
+        run: bash scripts/prepare-linux-runner.sh
+      - name: Serve one PHP build job and retire
+        env:
+          POOL: ${{ inputs.pool }}
+          RUNNER_REGISTRATION_TOKEN: ${{ secrets.RUNNER_REGISTRATION_TOKEN }}
+        run: python scripts/managed_runner.py
