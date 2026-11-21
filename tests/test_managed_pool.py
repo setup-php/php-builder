@@ -1,6 +1,8 @@
 import collections
 import sys
 import subprocess
+import json
+import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -20,6 +22,22 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_api_headers_record_rate_reset_and_stop_further_writes(self):
+        response = subprocess.CompletedProcess([], 1,
+            b'HTTP/2.0 403 Forbidden\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 2000000000\r\n\r\n{"message":"rate limit exceeded"}', b'HTTP 403')
+        with tempfile.TemporaryDirectory() as root, \
+                patch.dict('os.environ', {'GH_RATE_LIMIT_STATE': root + '/rate.json'}), \
+                patch('managed_pool.subprocess.run', return_value=response) as command:
+            with self.assertRaisesRegex(RuntimeError, 'quota exhausted'):
+                gh('repos/example/php-builder/environments/test', 'PUT', {})
+            self.assertEqual(json.loads(Path(root + '/rate.json').read_text())['resume_after'], 2000000010)
+            with self.assertRaisesRegex(RuntimeError, 'recorded reset'):
+                gh('repos/example/php-builder/environments/test', 'DELETE')
+            self.assertEqual(command.call_count, 1)
+        with patch('managed_pool.subprocess.run', return_value=subprocess.CompletedProcess(
+                [], 0, b'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"ok":true}', b'')):
+            self.assertEqual(gh('repos/example/php-builder'), {'ok': True})
+
     def test_read_token_is_scoped_to_workflow_reads_and_can_fall_back(self):
         success = subprocess.CompletedProcess([], 0, b'{}', b'')
         denied = subprocess.CompletedProcess([], 1, b'', b'HTTP 403')

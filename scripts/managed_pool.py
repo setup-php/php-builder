@@ -4,15 +4,22 @@ import concurrent.futures
 import datetime
 import json
 import os
+from pathlib import Path
+import re
 import secrets
 import subprocess
+import time
 
 from managed_profiles import PROFILES, TARGET, HOST, BRANCH, LIMITS, identify, labels
 
 
 
 def gh(path, method='GET', data=None):
-    command = ['gh', 'api', path, '--method', method]
+    limit_file = os.environ.get('GH_RATE_LIMIT_STATE')
+    if method != 'GET' and limit_file and Path(limit_file).exists():
+        if json.loads(Path(limit_file).read_text())['resume_after'] > time.time():
+            raise RuntimeError('GitHub write quota is waiting for its recorded reset')
+    command = ['gh', 'api', path, '--method', method, '--include']
     if data is not None:
         command += ['--input', '-']
     environment = None
@@ -30,9 +37,21 @@ def gh(path, method='GET', data=None):
             response = request(None)
     except subprocess.TimeoutExpired:
         raise RuntimeError('GitHub API operation timed out: ' + method + ' ' + path.split('/actions/')[0]) from None
+    raw = response.stdout.decode()
+    headers = {}
+    if raw.startswith('HTTP/'):
+        header, raw = re.split(r'\r?\n\r?\n', raw, maxsplit=1)
+        headers = {name.lower(): value.strip() for line in header.splitlines()
+                   if ':' in line for name, value in [line.split(':', 1)]}
     if response.returncode:
+        if headers.get('x-ratelimit-remaining') == '0' and limit_file:
+            resume_after = int(headers['x-ratelimit-reset']) + 10
+            temporary = Path(limit_file + '.' + secrets.token_hex(4))
+            temporary.write_text(json.dumps({'resume_after': resume_after}))
+            temporary.replace(limit_file)
+            raise RuntimeError(f'GitHub write quota exhausted; resume after {resume_after}')
         raise RuntimeError('GitHub API operation failed: ' + method + ' ' + path.split('/actions/')[0])
-    return json.loads(response.stdout) if response.stdout else None
+    return json.loads(raw) if raw.strip() else None
 
 
 class InventoryTruncated(RuntimeError):
