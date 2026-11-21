@@ -22,6 +22,22 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_fresh_target_inventory_is_reused_but_wrong_run_is_refetched(self):
+        with tempfile.TemporaryDirectory() as root, \
+                patch.dict('os.environ', {'TARGET_RUN_IDS': '1', 'TARGET_JOB_CACHE_DIR': root}), \
+                patch('managed_pool.pages', return_value=[job(3, run_id=1)]) as api:
+            cached = Path(root) / '1-jobs.json'
+            cached.write_text(json.dumps([job(2, run_id=1)]))
+            self.assertEqual(target_jobs(), [job(2, run_id=1)])
+            api.assert_not_called()
+            cached.write_text(json.dumps([job(2, run_id=9)]))
+            self.assertEqual(target_jobs(), [job(3, run_id=1)])
+            self.assertEqual(api.call_count, 1)
+            cached.write_text(json.dumps([job(2, run_id=1)]))
+            with patch('managed_pool.time.time', return_value=cached.stat().st_mtime + 91):
+                self.assertEqual(target_jobs(), [job(3, run_id=1)])
+            self.assertEqual(api.call_count, 2)
+
     def test_installation_tokens_follow_the_repository_for_reads_and_writes(self):
         success = subprocess.CompletedProcess([], 0, b'{}', b'')
         with patch.dict('os.environ', {'GH_TARGET_TOKEN': 'target-token', 'GH_HOST_TOKEN': 'host-token'}), \

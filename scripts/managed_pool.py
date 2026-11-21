@@ -120,6 +120,16 @@ def target_jobs():
     if not identifiers or len(identifiers) != len(set(identifiers)):
         raise ValueError('Explicit, unique target run IDs are required')
     def read(ident):
+        cache_directory = os.environ.get('TARGET_JOB_CACHE_DIR')
+        if cache_directory:
+            cached = Path(cache_directory) / f'{ident}-jobs.json'
+            try:
+                if 0 <= time.time() - cached.stat().st_mtime < 90:
+                    jobs = json.loads(cached.read_text())
+                    if jobs and all(job.get('run_id') == ident for job in jobs):
+                        return jobs
+            except (OSError, ValueError):
+                pass
         return pages(f'repos/{TARGET}/actions/runs/{ident}/jobs?filter=latest', 'jobs')
     jobs = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
