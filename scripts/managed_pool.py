@@ -28,12 +28,13 @@ class InventoryTruncated(RuntimeError):
 
 def pages(path, key):
     result = []
+    size = 50 if key == 'jobs' else 100
     for page in range(1, 100):
-        response = gh(path + ('&' if '?' in path else '?') + f'per_page=100&page={page}')
+        response = gh(path + ('&' if '?' in path else '?') + f'per_page={size}&page={page}')
         if key == 'workflow_runs' and response.get('total_count', 0) >= 1000:
             raise InventoryTruncated('Workflow search requires smaller time windows')
         result.extend(response[key])
-        if len(response[key]) < 100:
+        if len(response[key]) < size:
             return result
     raise RuntimeError('Inventory exceeded pagination limit')
 
@@ -77,8 +78,17 @@ def target_jobs():
         raise ValueError('Explicit, unique target run IDs are required')
     def read(ident):
         return pages(f'repos/{TARGET}/actions/runs/{ident}/jobs?filter=latest', 'jobs')
+    jobs = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        return [job for group in executor.map(read, identifiers) for job in group]
+        results = {executor.submit(read, ident): ident for ident in identifiers}
+        for result in concurrent.futures.as_completed(results):
+            try:
+                jobs.extend(result.result())
+            except RuntimeError:
+                # Provider/runner inventory still bounds capacity. An unavailable
+                # run must not prevent replenishment for other known queued jobs.
+                print(f'Job inventory unavailable for run {results[result]}; retrying next pass', flush=True)
+    return jobs
 
 
 def matching_profiles(job):

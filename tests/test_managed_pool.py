@@ -1,10 +1,11 @@
 import collections
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from managed_pool import capacity_reservations, launch_order, matching_profiles, plan_launches
+from managed_pool import capacity_reservations, launch_order, matching_profiles, pages, plan_launches, target_jobs
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -18,6 +19,21 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_job_inventory_uses_smaller_pages_until_complete(self):
+        with patch('managed_pool.gh', side_effect=[{'jobs': list(range(50))}, {'jobs': [50]}]) as api:
+            self.assertEqual(pages('jobs?filter=latest', 'jobs'), list(range(51)))
+        self.assertEqual([call.args[0] for call in api.call_args_list],
+                         ['jobs?filter=latest&per_page=50&page=1', 'jobs?filter=latest&per_page=50&page=2'])
+
+    def test_unavailable_run_does_not_block_other_queued_work(self):
+        def read(route, key):
+            if '/runs/1/' in route:
+                raise RuntimeError('temporary API failure')
+            return [job(2)]
+        with patch.dict('os.environ', {'TARGET_RUN_IDS': '1 2'}), \
+                patch('managed_pool.pages', side_effect=read), patch('builtins.print'):
+            self.assertEqual(target_jobs(), [job(2)])
+
     def test_both_providers_start_replenishing_without_waiting_for_each_other(self):
         planned = ['namespace-u24-x64'] * 80 + ['github-u24-arm64'] * 60
         ordered = launch_order(planned)
