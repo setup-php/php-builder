@@ -15,10 +15,19 @@ def gh(path, method='GET', data=None):
     command = ['gh', 'api', path, '--method', method]
     if data is not None:
         command += ['--input', '-']
+    environment = None
+    for repo, variable in ((TARGET, 'GH_TARGET_READ_TOKEN'), (HOST, 'GH_HOST_READ_TOKEN')):
+        if method == 'GET' and path.startswith(f'repos/{repo}/actions/runs') and os.environ.get(variable):
+            environment = dict(os.environ, GH_TOKEN=os.environ[variable])
+            break
+    def request(env):
+        return subprocess.run(command, input=json.dumps(data).encode() if data is not None else None,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                              timeout=15 if method == 'GET' else 60)
     try:
-        response = subprocess.run(command, input=json.dumps(data).encode() if data is not None else None,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  timeout=15 if method == 'GET' else 60)
+        response = request(environment)
+        if environment and response.returncode and any(code in response.stderr for code in (b'HTTP 401', b'HTTP 403')):
+            response = request(None)
     except subprocess.TimeoutExpired:
         raise RuntimeError('GitHub API operation timed out: ' + method + ' ' + path.split('/actions/')[0]) from None
     if response.returncode:

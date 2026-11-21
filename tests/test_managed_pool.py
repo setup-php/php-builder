@@ -20,6 +20,22 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_read_token_is_scoped_to_workflow_reads_and_can_fall_back(self):
+        success = subprocess.CompletedProcess([], 0, b'{}', b'')
+        denied = subprocess.CompletedProcess([], 1, b'', b'HTTP 403')
+        with patch.dict('os.environ', {'GH_TARGET_READ_TOKEN': 'test-read-token'}), \
+                patch('managed_pool.subprocess.run', return_value=success) as command:
+            gh('repos/shivammathur/php-builder/actions/runs/1/jobs')
+            self.assertEqual(command.call_args.kwargs['env']['GH_TOKEN'], 'test-read-token')
+            gh('repos/shivammathur/php-builder/actions/runners')
+            self.assertIsNone(command.call_args.kwargs['env'])
+            gh('repos/shivammathur/php-builder/actions/runs/1/rerun', 'POST')
+            self.assertIsNone(command.call_args.kwargs['env'])
+        with patch.dict('os.environ', {'GH_TARGET_READ_TOKEN': 'test-read-token'}), \
+                patch('managed_pool.subprocess.run', side_effect=[denied, success]) as command:
+            self.assertEqual(gh('repos/shivammathur/php-builder/actions/runs/1/jobs'), {})
+            self.assertIsNone(command.call_args.kwargs['env'])
+
     def test_slow_api_reads_are_bounded_and_leave_other_runs_available(self):
         with patch('managed_pool.subprocess.run', side_effect=subprocess.TimeoutExpired('gh', 15)) as command:
             with self.assertRaisesRegex(RuntimeError, 'timed out'):
