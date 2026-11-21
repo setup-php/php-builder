@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
-from managed_pool import capacity_reservations, matching_profiles, plan_launches
+from managed_pool import capacity_reservations, launch_order, matching_profiles, plan_launches
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -18,6 +18,13 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_both_providers_start_replenishing_without_waiting_for_each_other(self):
+        planned = ['namespace-u24-x64'] * 80 + ['github-u24-arm64'] * 60
+        ordered = launch_order(planned)
+        self.assertEqual(collections.Counter(ordered), collections.Counter(planned))
+        self.assertEqual(ordered[:4], ['namespace-u24-x64', 'github-u24-arm64'] * 2)
+        self.assertEqual(launch_order([]), [])
+
     def test_stopped_hosts_release_capacity_but_keep_busy_cleanup_guard(self):
         stopped, live, unknown = [name('namespace-u24-x64', i) for i in range(3)]
         protected = {stopped, live, unknown}

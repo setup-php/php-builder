@@ -98,6 +98,14 @@ def capacity_reservations(protected, runners, known):
     return protected - stopped
 
 
+def launch_order(planned):
+    groups = collections.defaultdict(collections.deque)
+    for key in planned:
+        groups[PROFILES[key]['provider']].append(key)
+    return [group.popleft() for _ in range(max(map(len, groups.values()), default=0))
+            for group in groups.values() if group]
+
+
 def plan_launches(protected, runners, jobs, limits):
     registered = {runner['name']: runner for runner in runners}
     consumed = {job.get('runner_name') for job in jobs if job['status'] != 'queued'}
@@ -173,13 +181,16 @@ def maintain():
         raise ValueError('Provider capacity exceeds the authorized limit')
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     now = datetime.datetime.now(datetime.timezone.utc)
-    runs = host_runs(now)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as inventory:
+        run_result = inventory.submit(host_runs, now)
+        runner_result = inventory.submit(pages, f'repos/{TARGET}/actions/runners', 'runners')
+        environment_result = inventory.submit(pages, f'repos/{HOST}/environments', 'environments')
+        job_result = inventory.submit(target_jobs)
+        runs, runners, environments, jobs = (result.result() for result in
+                                            (run_result, runner_result, environment_result, job_result))
     known = pool_runs(runs)
     active = active_pools(runs)
-    runners = pages(f'repos/{TARGET}/actions/runners', 'runners')
     registered = {runner['name'] for runner in runners}
-    environments = pages(f'repos/{HOST}/environments', 'environments')
-    jobs = target_jobs()
     protected = set(active)
     cleanup = []
     for runner in runners:
@@ -227,7 +238,7 @@ def maintain():
     # Replenish first; independent stale-resource cleanup must not delay hosts.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as launches, \
             concurrent.futures.ThreadPoolExecutor(max_workers=5) as removals:
-        results = [launches.submit(launch, now, key) for key in planned]
+        results = [launches.submit(launch, now, key) for key in launch_order(planned)]
         results += [removals.submit(remove, item) for item in cleanup]
         errors = []
         for result in results:
