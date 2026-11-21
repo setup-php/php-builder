@@ -17,7 +17,7 @@ for provider in LIMITS:
             if version == '24.04' and arch == 'x64':
                 aliases.append('ubuntu-latest')
             PROFILES[key] = {
-                'prefix': f'runner-pool-phpbuild-{key}-',
+                'prefix': f'runner-pool-php-{key}-',
                 'provider': provider, 'arch': arch, 'platform': f'ubuntu-{version}',
                 'image': f'nscloud-ubuntu-{version}-{ns_arch}-1x2' if provider == 'namespace' else label,
                 'labels': aliases,
@@ -26,9 +26,10 @@ for provider in LIMITS:
 
 def identify(name):
     for key, profile in PROFILES.items():
-        match = re.fullmatch(profile['prefix'] + r'[0-9]{8}-[0-9]{6}-[a-f0-9]{8}', name)
-        if match:
-            return key
+        prefixes = [profile['prefix'], profile['prefix'].replace('runner-pool-php-', 'runner-pool-phpbuild-')]
+        for prefix in prefixes:
+            if re.fullmatch(prefix + r'[0-9]{8}-[0-9]{6}-[a-f0-9]{8}', name):
+                return key
     return None
 
 

@@ -218,7 +218,7 @@ def maintain():
             try:
                 result.result()
             except Exception as error:
-                errors.append(type(error).__name__)
+                errors.append(str(error) if isinstance(error, RuntimeError) else type(error).__name__)
         if errors:
             raise RuntimeError('Runner launch failures: ' + ', '.join(errors))
 

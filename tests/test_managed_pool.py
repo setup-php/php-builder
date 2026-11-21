@@ -18,6 +18,13 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_every_provider_name_fits_github_limit_and_old_hosts_remain_owned(self):
+        for key in PROFILES:
+            current = name(key, 1)
+            self.assertLessEqual(len(current), 64)
+            self.assertEqual(identify(current), key)
+            self.assertEqual(identify(current.replace('runner-pool-php-', 'runner-pool-phpbuild-')), key)
+
     def test_shared_provider_limits_and_both_architectures(self):
         jobs = [job(i) for i in range(300)] + [job(1000 + i, 'ubuntu-24.04-arm') for i in range(300)]
         planned, _, _, _ = plan_launches(set(), [], jobs, LIMITS)
