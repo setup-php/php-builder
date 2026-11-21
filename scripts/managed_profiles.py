@@ -6,7 +6,7 @@ from runner_pool import validate_host
 TARGET = 'shivammathur/php-builder'
 HOST = 'setup-php/php-builder'
 BRANCH = 'feature/php-build-runner-pool'
-LIMITS = {'namespace': 80, 'github': 60}
+LIMITS = {'namespace': 40, 'github': 60}
 PROFILES = {}
 for provider in LIMITS:
     for version in ('22.04', '24.04'):
@@ -19,7 +19,7 @@ for provider in LIMITS:
             PROFILES[key] = {
                 'prefix': f'runner-pool-php-{key}-',
                 'provider': provider, 'arch': arch, 'platform': f'ubuntu-{version}',
-                'image': f'nscloud-ubuntu-{version}-{ns_arch}-2x4' if provider == 'namespace' else label,
+                'image': f'nscloud-ubuntu-{version}-{ns_arch}-4x8' if provider == 'namespace' else label,
                 'labels': aliases,
             }
 

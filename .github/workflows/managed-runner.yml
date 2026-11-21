@@ -22,10 +22,10 @@ on:
         type: choice
         required: true
         options:
-          - nscloud-ubuntu-22.04-amd64-2x4
-          - nscloud-ubuntu-22.04-arm64-2x4
-          - nscloud-ubuntu-24.04-amd64-2x4
-          - nscloud-ubuntu-24.04-arm64-2x4
+          - nscloud-ubuntu-22.04-amd64-4x8
+          - nscloud-ubuntu-22.04-arm64-4x8
+          - nscloud-ubuntu-24.04-amd64-4x8
+          - nscloud-ubuntu-24.04-arm64-4x8
           - ubuntu-22.04
           - ubuntu-22.04-arm
           - ubuntu-24.04
@@ -37,7 +37,7 @@ permissions:
 jobs:
   validate:
     if: github.event_name == 'push'
-    runs-on: nscloud-ubuntu-24.04-${{ matrix.arch }}-2x4
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.arch }}-4x8
     strategy:
       fail-fast: false
       matrix:
