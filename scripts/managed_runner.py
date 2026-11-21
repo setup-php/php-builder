@@ -50,11 +50,20 @@ def serve_job(directory, env, log, accept_seconds=ACCEPT_SECONDS, max_seconds=MA
 
 
 def configure_runner(directory, key, name, token, env, log):
-    subprocess.run([
+    result = subprocess.run([
         './config.sh', '--unattended', '--ephemeral', '--url', f'https://github.com/{TARGET}',
         '--token', token, '--name', name, '--work', '_work',
         '--no-default-labels', '--labels', ','.join(labels(key)),
-    ], cwd=directory, env=env, stdout=log, stderr=log, timeout=120, check=True)
+    ], cwd=directory, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+    log.write(result.stdout)
+    log.flush()
+    if result.returncode:
+        diagnostic = result.stdout.decode(errors='replace').replace(token, '[redacted]')
+        diagnostic = re.sub(r'(?i)(authorization:|bearer)\s+\S+', r'\1 [redacted]', diagnostic)
+        print(f'Runner configuration exited with code {result.returncode}.', flush=True)
+        for line in diagnostic.splitlines()[-12:]:
+            print(line, flush=True)
+        raise RuntimeError('Runner configuration failed')
 
 
 def serve():
