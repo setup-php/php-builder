@@ -172,6 +172,7 @@ def maintain():
     environments = pages(f'repos/{HOST}/environments', 'environments')
     jobs = target_jobs()
     protected = set(active)
+    cleanup = []
     for runner in runners:
         name = runner['name']
         if identify(name) is None or name in active:
@@ -181,8 +182,7 @@ def maintain():
             protected.add(name)
             continue
         if not dry_run:
-            gh(f'repos/{TARGET}/actions/runners/{runner["id"]}', 'DELETE')
-            print(f'Removed stopped runner {name}', flush=True)
+            cleanup.append((f'repos/{TARGET}/actions/runners/{runner["id"]}', name))
     for environment in environments:
         name = environment['name']
         if identify(name) is None or name in protected:
@@ -195,8 +195,7 @@ def maintain():
         # A completed single-job host must release its slot immediately, even
         # if its environment was created less than thirty minutes ago.
         if not dry_run:
-            gh(f'repos/{HOST}/environments/{name}', 'DELETE')
-            print(f'Removed finished environment {name}', flush=True)
+            cleanup.append((f'repos/{HOST}/environments/{name}', name))
     consumed = {job.get('runner_name') for job in jobs if job['status'] != 'queued'}
     for name, run in active.items():
         age = now - datetime.datetime.fromisoformat(run['created_at'].replace('Z', '+00:00'))
@@ -209,10 +208,17 @@ def maintain():
                       'active_hosts': len(active), 'reserved_hosts': len(protected),
                       'provider_capacities': limits, 'launching': dict(collections.Counter(planned)),
                       'capacity_deferred': deferred, 'dry_run': dry_run}), flush=True)
-    if dry_run or not planned:
+    if dry_run:
         return
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        results = [executor.submit(launch, now, key) for key in planned]
+    def remove(item):
+        route, name = item
+        gh(route, 'DELETE')
+        print(f'Removed finished resource {name}', flush=True)
+    # Replenish first; independent stale-resource cleanup must not delay hosts.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as launches, \
+            concurrent.futures.ThreadPoolExecutor(max_workers=5) as removals:
+        results = [launches.submit(launch, now, key) for key in planned]
+        results += [removals.submit(remove, item) for item in cleanup]
         errors = []
         for result in results:
             try:
