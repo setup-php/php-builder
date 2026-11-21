@@ -88,6 +88,8 @@ def serve():
     print(f'Host verified: Ubuntu {version}, {platform.machine()}, '
           f'{os.cpu_count()} vCPUs, {memory} bytes RAM.', flush=True)
     env = child_environment(os.environ)
+    # Older PHP installers expect the native distro ID in GitHub-runner mode.
+    env['DIST_ID'] = platform.freedesktop_os_release()['ID']
     directory = Path(tempfile.mkdtemp(prefix='managed-runner-', dir=os.environ['RUNNER_TEMP']))
 
     def interrupted(signum, frame):
