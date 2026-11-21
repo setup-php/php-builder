@@ -9,6 +9,7 @@ on:
       - scripts/managed_*.py
       - scripts/runner_pool.py
       - scripts/prepare-linux-runner.sh
+      - scripts/test-runner-compression.sh
       - tests/**
   workflow_dispatch:
     inputs:
@@ -21,10 +22,10 @@ on:
         type: choice
         required: true
         options:
-          - nscloud-ubuntu-22.04-amd64-1x2
-          - nscloud-ubuntu-22.04-arm64-1x2
-          - nscloud-ubuntu-24.04-amd64-1x2
-          - nscloud-ubuntu-24.04-arm64-1x2
+          - nscloud-ubuntu-22.04-amd64-2x4
+          - nscloud-ubuntu-22.04-arm64-2x4
+          - nscloud-ubuntu-24.04-amd64-2x4
+          - nscloud-ubuntu-24.04-arm64-2x4
           - ubuntu-22.04
           - ubuntu-22.04-arm
           - ubuntu-24.04
@@ -36,12 +37,18 @@ permissions:
 jobs:
   validate:
     if: github.event_name == 'push'
-    runs-on: nscloud-ubuntu-24.04-amd64-1x2
+    runs-on: nscloud-ubuntu-24.04-${{ matrix.arch }}-2x4
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: python3 -m unittest discover -s tests -v
+      - name: Verify PHP archive compression within the host memory budget
+        run: bash scripts/test-runner-compression.sh
 
   runner:
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}

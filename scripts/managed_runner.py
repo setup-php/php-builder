@@ -19,8 +19,8 @@ MAX_SECONDS = 340 * 60
 
 def validate_namespace_shape(cpu_count, memory_bytes):
     # MemTotal excludes the kernel's reserved memory.
-    if cpu_count != 1 or not 1_700_000_000 <= memory_bytes <= 2 * 1024 ** 3:
-        raise ValueError('Expected a Namespace 1-vCPU/2-GB Linux host')
+    if cpu_count != 2 or not 3_500_000_000 <= memory_bytes <= 4 * 1024 ** 3:
+        raise ValueError('Expected a Namespace 2-vCPU/4-GB Linux host')
 
 
 def serve_job(directory, env, log, accept_seconds=ACCEPT_SECONDS, max_seconds=MAX_SECONDS):

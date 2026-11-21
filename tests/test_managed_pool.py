@@ -29,8 +29,8 @@ class ManagedPoolTests(unittest.TestCase):
         jobs = [job(i) for i in range(300)] + [job(1000 + i, 'ubuntu-24.04-arm') for i in range(300)]
         planned, _, _, _ = plan_launches(set(), [], jobs, LIMITS)
         self.assertEqual(collections.Counter(PROFILES[key]['provider'] for key in planned), LIMITS)
-        self.assertEqual(collections.Counter(PROFILES[key]['arch'] for key in planned), {'x64': 110, 'arm64': 110})
-        self.assertTrue(all(PROFILES[key]['image'].endswith('-1x2') for key in planned if key.startswith('namespace-')))
+        self.assertEqual(collections.Counter(PROFILES[key]['arch'] for key in planned), {'x64': 70, 'arm64': 70})
+        self.assertTrue(all(PROFILES[key]['image'].endswith('-2x4') for key in planned if key.startswith('namespace-')))
 
     def test_busy_hosts_use_capacity_and_idle_hosts_cover_one_job(self):
         key = 'namespace-u24-x64'
@@ -55,15 +55,15 @@ class ManagedPoolTests(unittest.TestCase):
                 validate(key, 'Linux', 'aarch64', '24.04')
 
     def test_booting_hosts_reserve_capacity_without_duplicate_launches(self):
-        protected = {name('namespace-u24-x64', i) for i in range(160)}
-        planned, _, covered, _ = plan_launches(protected, [], [job(i) for i in range(160)], LIMITS)
+        protected = {name('namespace-u24-x64', i) for i in range(80)}
+        planned, _, covered, _ = plan_launches(protected, [], [job(i) for i in range(80)], LIMITS)
         self.assertEqual(planned, [])
-        self.assertEqual(sum(covered.values()), 160)
+        self.assertEqual(sum(covered.values()), 80)
         self.assertTrue(all(identify(value) == 'namespace-u24-x64' for value in protected))
 
     def test_minimum_namespace_shape_is_enforced(self):
-        validate_namespace_shape(1, 1_900_000_000)
-        for cpu, memory in [(2, 2_000_000_000), (1, 4_000_000_000), (1, 1_000_000_000)]:
+        validate_namespace_shape(2, 3_900_000_000)
+        for cpu, memory in [(1, 2_000_000_000), (2, 8_000_000_000), (2, 2_000_000_000)]:
             with self.assertRaises(ValueError):
                 validate_namespace_shape(cpu, memory)
 
