@@ -76,6 +76,13 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+      - name: Install the SQL Server extensions' ODBC runtime
+        if: inputs.image == 'nscloud-ubuntu-22.04-amd64-4x8'
+        run: |
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libodbcinst.so.2 ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends libodbcinst2
+          fi
       - name: Prepare Linux service isolation
         run: bash scripts/prepare-linux-runner.sh
       - name: Serve one PHP build job and retire
