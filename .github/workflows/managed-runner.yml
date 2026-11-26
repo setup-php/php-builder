@@ -14,9 +14,13 @@ on:
   workflow_dispatch:
     inputs:
       pool:
-        description: Prepared environment for one ephemeral runner
+        description: Prepared environment for ephemeral runners
         type: string
         required: true
+      runners:
+        description: Optional JSON array of ephemeral runner names
+        type: string
+        required: false
       image:
         description: Native Linux host matching the registered runner
         type: choice
@@ -57,7 +61,11 @@ jobs:
   runner:
     if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
     needs: validate
-    name: Single-job ${{ inputs.image }} runner
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ fromJSON(inputs.runners || '[""]') }}
+    name: ${{ matrix.runner || inputs.pool }}
     runs-on: ${{ inputs.image }}
     timeout-minutes: 360
     environment: ${{ inputs.pool }}
@@ -72,6 +80,6 @@ jobs:
         run: bash scripts/prepare-linux-runner.sh
       - name: Serve one PHP build job and retire
         env:
-          POOL: ${{ inputs.pool }}
+          POOL: ${{ matrix.runner || inputs.pool }}
           RUNNER_REGISTRATION_TOKEN: ${{ secrets.RUNNER_REGISTRATION_TOKEN }}
         run: python scripts/managed_runner.py

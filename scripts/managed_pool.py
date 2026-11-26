@@ -108,10 +108,36 @@ def host_runs(now):
     return list(runs.values())
 
 
+# The batch environment identifies every member before GitHub exposes the jobs.
+# Each member still registers on a separate VM and accepts exactly one target job.
+BATCH_SIZE = 64
+
+
+def pool_members(pool):
+    match = re.fullmatch(r'(.+)-batch-([1-9][0-9]?)', pool)
+    if not match:
+        return [pool] if identify(pool) else []
+    base, size = match.groups()
+    if not identify(base) or not 2 <= int(size) <= BATCH_SIZE:
+        return []
+    start = int(base[-8:], 16)
+    return [base[:-8] + f'{(start + index) % (1 << 32):08x}' for index in range(int(size))]
+
+
 def pool_runs(runs):
-    return {name: run for run in runs
-            if run['display_title'].startswith('Managed runner ')
-            and identify(name := run['display_title'].removeprefix('Managed runner '))}
+    known = {}
+    for run in runs:
+        title = run['display_title']
+        if not title.startswith('Managed runner '):
+            continue
+        members = pool_members(title.removeprefix('Managed runner '))
+        statuses = {}
+        if len(members) > 1 and run['status'] != 'completed':
+            jobs = pages(f"repos/{HOST}/actions/runs/{run['id']}/jobs?filter=latest", 'jobs')
+            statuses = {job['name']: job['status'] for job in jobs}
+        for name in members:
+            known[name] = dict(run, status=statuses.get(name, run['status']))
+    return known
 
 
 def active_pools(runs):
@@ -231,13 +257,18 @@ def refresh_registration(name):
     del registration
 
 
-def launch(now, key):
+def launch(now, key, size=1):
     profile = PROFILES[key]
     pool = profile['prefix'] + now.strftime('%Y%m%d-%H%M%S-') + secrets.token_hex(4)
+    inputs = {'image': profile['image']}
+    if size > 1:
+        pool += f'-batch-{size}'
+        inputs['runners'] = json.dumps(pool_members(pool))
+    inputs['pool'] = pool
     create_environment(pool)
     refresh_registration(pool)
     gh(f'repos/{HOST}/actions/workflows/managed-runner.yml/dispatches', 'POST',
-       {'ref': BRANCH, 'inputs': {'pool': pool, 'image': profile['image']}})
+       {'ref': BRANCH, 'inputs': inputs})
     print(f'Dispatched {key}: {pool}', flush=True)
 
 
@@ -256,7 +287,7 @@ def maintain():
         runs, runners, environments, jobs = (result.result() for result in
                                             (run_result, runner_result, environment_result, job_result))
     known = pool_runs(runs)
-    active = active_pools(runs)
+    active = {name: run for name, run in known.items() if run['status'] != 'completed'}
     registered = {runner['name'] for runner in runners}
     protected = set(active)
     cleanup = []
@@ -272,23 +303,33 @@ def maintain():
             cleanup.append((f'repos/{TARGET}/actions/runners/{runner["id"]}', name))
     for environment in environments:
         name = environment['name']
-        if identify(name) is None or name in protected:
+        members = pool_members(name)
+        if not members or any(member in protected for member in members):
             continue
         age = now - datetime.datetime.fromisoformat(environment['created_at'].replace('Z', '+00:00'))
-        if name not in known and age < datetime.timedelta(minutes=30):
-            # Reserve a slot for dispatch visibility delays or partial setup.
-            protected.add(name)
+        if not any(member in known for member in members) and age < datetime.timedelta(minutes=30):
+            # Reserve every member during dispatch visibility delays or partial setup.
+            protected.update(members)
             continue
         # A completed single-job host must release its slot immediately, even
         # if its environment was created less than thirty minutes ago.
         if not dry_run:
             cleanup.append((f'repos/{HOST}/environments/{name}', name))
     consumed = {job.get('runner_name') for job in jobs if job['status'] != 'queued'}
+    cancelled = set()
     for name, run in active.items():
+        if run['id'] in cancelled:
+            continue
         age = now - datetime.datetime.fromisoformat(run['created_at'].replace('Z', '+00:00'))
-        if name not in registered and name not in consumed and age > datetime.timedelta(minutes=45):
+        if age <= datetime.timedelta(minutes=45):
+            continue
+        siblings = pool_members(run['display_title'].removeprefix('Managed runner '))
+        if len(siblings) > 1 and any(known[member]['status'] == 'in_progress' for member in siblings):
+            continue
+        if not (registered | consumed).intersection(siblings):
             if not dry_run:
                 gh(f"repos/{HOST}/actions/runs/{run['id']}/cancel", 'POST')
+                cancelled.add(run['id'])
                 print(f'Cancelled stale queued host {name}', flush=True)
     reservations = capacity_reservations(protected, runners, known)
     planned, queued, covered, deferred = plan_launches(reservations, runners, jobs, limits)
@@ -305,7 +346,9 @@ def maintain():
     # Replenish first; independent stale-resource cleanup must not delay hosts.
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as launches, \
             concurrent.futures.ThreadPoolExecutor(max_workers=5) as removals:
-        results = [launches.submit(launch, now, key) for key in launch_order(planned)]
+        counts = collections.Counter(launch_order(planned))
+        results = [launches.submit(launch, now, key, min(BATCH_SIZE, count - offset))
+                   for key, count in counts.items() for offset in range(0, count, BATCH_SIZE)]
         results += [removals.submit(remove, item) for item in cleanup]
         errors = []
         for result in results:

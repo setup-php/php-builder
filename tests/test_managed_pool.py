@@ -1,4 +1,5 @@
 import collections
+import datetime
 import sys
 import subprocess
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'scripts'))
 from managed_pool import capacity_reservations, gh, launch_order, matching_profiles, pages, plan_launches, refresh_registration, target_jobs
+from managed_pool import BATCH_SIZE, launch, pool_members, pool_runs
 from managed_profiles import LIMITS, PROFILES, identify, labels, validate
 from managed_runner import validate_namespace_shape
 
@@ -22,6 +24,37 @@ def name(key, number):
 
 
 class ManagedPoolTests(unittest.TestCase):
+    def test_batch_members_match_the_dispatched_job_names(self):
+        base = name('blacksmith-u24-arm64', 0xffffffff)
+        members = pool_members(base + '-batch-3')
+        self.assertEqual(members, [base, name('blacksmith-u24-arm64', 0), name('blacksmith-u24-arm64', 1)])
+        self.assertEqual(pool_members(base), [base])
+        self.assertEqual(pool_members(base + '-batch-1'), [])
+        self.assertEqual(pool_members(base + f'-batch-{BATCH_SIZE+1}'), [])
+        self.assertEqual(pool_members('unrelated-batch-3'), [])
+        now = datetime.datetime(2026, 11, 21, 8, tzinfo=datetime.timezone.utc)
+        with patch('managed_pool.secrets.token_hex', return_value='ffffffff'), \
+                patch('managed_pool.create_environment') as create, patch('managed_pool.refresh_registration') as token, \
+                patch('managed_pool.gh') as api, patch('builtins.print'):
+            launch(now, 'blacksmith-u24-arm64', 3)
+            create.assert_called_once_with(base + '-batch-3')
+            token.assert_called_once_with(base + '-batch-3')
+            self.assertEqual(json.loads(api.call_args.args[2]['inputs']['runners']), members)
+
+    def test_batch_capacity_tracks_each_host_and_reserves_jobs_not_visible_yet(self):
+        base = name('github-u24-x64', 0)
+        members = pool_members(base + '-batch-3')
+        run = {'id': 100, 'display_title': 'Managed runner ' + base + '-batch-3', 'status': 'queued'}
+        jobs = [{'name': members[0], 'status': 'completed'}, {'name': members[1], 'status': 'in_progress'}]
+        with patch('managed_pool.pages', return_value=jobs) as read:
+            known = pool_runs([run])
+            self.assertEqual([known[n]['status'] for n in members], ['completed', 'in_progress', 'queued'])
+            read.assert_called_once()
+        with patch('managed_pool.pages') as read:
+            known = pool_runs([dict(run, status='completed')])
+            self.assertTrue(all(known[n]['status'] == 'completed' for n in members))
+            read.assert_not_called()
+
     def test_fresh_target_inventory_is_reused_but_wrong_run_is_refetched(self):
         with tempfile.TemporaryDirectory() as root, \
                 patch.dict('os.environ', {'TARGET_RUN_IDS': '1', 'TARGET_JOB_CACHE_DIR': root}), \
