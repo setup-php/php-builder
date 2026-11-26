@@ -22,9 +22,9 @@ def repository_environment(repo):
 
 def gh(path, method='GET', data=None):
     limit_file = os.environ.get('GH_RATE_LIMIT_STATE')
-    if method != 'GET' and limit_file and Path(limit_file).exists():
+    if limit_file and Path(limit_file).exists():
         if json.loads(Path(limit_file).read_text())['resume_after'] > time.time():
-            raise RuntimeError('GitHub write quota is waiting for its recorded reset')
+            raise RuntimeError('GitHub API is waiting for its recorded reset')
     command = ['gh', 'api', path, '--method', method, '--include']
     if data is not None:
         command += ['--input', '-']
@@ -44,7 +44,7 @@ def gh(path, method='GET', data=None):
                               timeout=15 if method == 'GET' else 60)
     try:
         response = request(environment)
-        if environment and response.returncode and any(code in response.stderr for code in (b'HTTP 401', b'HTTP 403')):
+        if environment and response.returncode and b'rate limit' not in response.stderr.lower() and any(code in response.stderr for code in (b'HTTP 401', b'HTTP 403')):
             response = request(None)
     except subprocess.TimeoutExpired:
         raise RuntimeError('GitHub API operation timed out: ' + method + ' ' + path.split('/actions/')[0]) from None
@@ -55,12 +55,15 @@ def gh(path, method='GET', data=None):
         headers = {name.lower(): value.strip() for line in header.splitlines()
                    if ':' in line for name, value in [line.split(':', 1)]}
     if response.returncode:
-        if headers.get('x-ratelimit-remaining') == '0' and limit_file:
-            resume_after = int(headers['x-ratelimit-reset']) + 10
+        if limit_file and (headers.get('x-ratelimit-remaining') == '0' or 'retry-after' in headers or
+                           b'HTTP 429' in response.stderr or b'secondary rate limit' in response.stderr.lower()):
+            resume_after = int(time.time()) + int(headers.get('retry-after', 60)) + 10
+            if headers.get('x-ratelimit-remaining') == '0':
+                resume_after = max(resume_after, int(headers['x-ratelimit-reset']) + 10)
             temporary = Path(limit_file + '.' + secrets.token_hex(4))
             temporary.write_text(json.dumps({'resume_after': resume_after}))
             temporary.replace(limit_file)
-            raise RuntimeError(f'GitHub write quota exhausted; resume after {resume_after}')
+            raise RuntimeError(f'GitHub API quota exhausted; resume after {resume_after}')
         raise RuntimeError('GitHub API operation failed: ' + method + ' ' + path.split('/actions/')[0])
     return json.loads(raw) if raw.strip() else None
 
@@ -202,7 +205,7 @@ def plan_launches(protected, runners, jobs, limits):
                 waiting.pop(match)
                 covered[key] += 1
                 continue
-            chosen = next((candidate for candidate in candidates if budgets[PROFILES[candidate]['provider']]), None)
+            chosen = next((candidate for candidate in candidates if budgets.get(PROFILES[candidate]['provider'], 0)), None)
             if chosen is None:
                 deferred[key] += 1
                 continue

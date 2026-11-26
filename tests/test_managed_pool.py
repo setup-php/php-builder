@@ -74,6 +74,18 @@ class ManagedPoolTests(unittest.TestCase):
                 [], 0, b'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"ok":true}', b'')):
             self.assertEqual(gh('repos/example/php-builder'), {'ok': True})
 
+    def test_secondary_rate_limit_pauses_reads_for_retry_after(self):
+        response = subprocess.CompletedProcess([], 1, b'HTTP/2.0 429\r\nRetry-After: 120\r\n\r\n{}', b'HTTP 429')
+        with tempfile.TemporaryDirectory() as root, patch('managed_pool.time.time', return_value=1000), \
+                patch.dict('os.environ', {'GH_RATE_LIMIT_STATE': root + '/rate.json'}), \
+                patch('managed_pool.subprocess.run', return_value=response) as command:
+            with self.assertRaisesRegex(RuntimeError, 'quota exhausted'):
+                gh('repos/example/php-builder')
+            self.assertEqual(json.loads(Path(root + '/rate.json').read_text())['resume_after'], 1130)
+            with self.assertRaisesRegex(RuntimeError, 'recorded reset'):
+                gh('repos/example/php-builder')
+            self.assertEqual(command.call_count, 1)
+
     def test_read_token_is_scoped_to_workflow_reads_and_can_fall_back(self):
         success = subprocess.CompletedProcess([], 0, b'{}', b'')
         denied = subprocess.CompletedProcess([], 1, b'', b'HTTP 403')
@@ -142,7 +154,9 @@ class ManagedPoolTests(unittest.TestCase):
         jobs = [job(i) for i in range(300)] + [job(1000 + i, 'ubuntu-24.04-arm') for i in range(300)]
         planned, _, _, _ = plan_launches(set(), [], jobs, LIMITS)
         self.assertEqual(collections.Counter(PROFILES[key]['provider'] for key in planned), LIMITS)
-        self.assertEqual(collections.Counter(PROFILES[key]['arch'] for key in planned), {'x64': 50, 'arm64': 50})
+        self.assertEqual(collections.Counter(PROFILES[key]['arch'] for key in planned), {'x64': 70, 'arm64': 70})
+        self.assertEqual(PROFILES['blacksmith-u24-arm64']['image'], 'blacksmith-4vcpu-ubuntu-2404-arm')
+        self.assertEqual(PROFILES['blacksmith-u22-x64']['image'], 'blacksmith-2vcpu-ubuntu-2204')
         self.assertTrue(all(PROFILES[key]['image'].endswith('-4x8') for key in planned if key.startswith('namespace-')))
 
     def test_busy_hosts_use_capacity_and_idle_hosts_cover_one_job(self):
@@ -158,7 +172,7 @@ class ManagedPoolTests(unittest.TestCase):
 
     def test_native_baselines_and_architectures_cannot_mix(self):
         candidates = matching_profiles(job(1, 'ubuntu-22.04-arm'))
-        self.assertEqual(candidates, ['namespace-u22-arm64', 'github-u22-arm64'])
+        self.assertEqual(candidates, ['namespace-u22-arm64', 'github-u22-arm64', 'blacksmith-u22-arm64'])
         self.assertEqual(matching_profiles(job(2, 'Linux')), [])
         self.assertEqual(matching_profiles(job(3, 'macos-15')), [])
         for key in candidates:

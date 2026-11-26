@@ -22,6 +22,10 @@ on:
         type: choice
         required: true
         options:
+          - blacksmith-2vcpu-ubuntu-2204
+          - blacksmith-2vcpu-ubuntu-2204-arm
+          - blacksmith-4vcpu-ubuntu-2404
+          - blacksmith-4vcpu-ubuntu-2404-arm
           - nscloud-ubuntu-22.04-amd64-4x8
           - nscloud-ubuntu-22.04-arm64-4x8
           - nscloud-ubuntu-24.04-amd64-4x8
